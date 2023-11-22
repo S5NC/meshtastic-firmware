@@ -28,5 +28,3 @@
 #define SX126X_DIO3_TCXO_VOLTAGE 1.8
 
 #define HAS_GPS 0
-#undef GPS_RX_PIN
-#undef GPS_TX_PIN
