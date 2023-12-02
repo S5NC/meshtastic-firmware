@@ -495,14 +495,14 @@ void GPS::setGPSPower(bool on, bool standbyOnly, uint32_t sleepTime)
 #ifdef PIN_GPS_STANDBY // Specifically the standby pin for L76K and clones
     if (on) {
         LOG_INFO("Waking GPS");
-        pinMode(PIN_GPS_STANDBY, OUTPUT);
         digitalWrite(PIN_GPS_STANDBY, 1);
+        pinMode(PIN_GPS_STANDBY, OUTPUT);
         return;
     } else {
         LOG_INFO("GPS entering sleep");
         // notifyGPSSleep.notifyObservers(NULL);
-        pinMode(PIN_GPS_STANDBY, OUTPUT);
         digitalWrite(PIN_GPS_STANDBY, 0);
+        pinMode(PIN_GPS_STANDBY, OUTPUT);
         return;
     }
 #endif
@@ -920,8 +920,8 @@ GPS *GPS::createGps()
 
     if (_en_gpio != 0) {
         LOG_DEBUG("Setting %d to output.\n", _en_gpio);
-        pinMode(_en_gpio, OUTPUT);
         digitalWrite(_en_gpio, !GPS_EN_ACTIVE);
+        pinMode(_en_gpio, OUTPUT);
     }
 
 #ifdef PIN_GPS_PPS
@@ -941,8 +941,8 @@ GPS *GPS::createGps()
     new_gps->setGPSPower(true, false, 0);
 
 #ifdef PIN_GPS_RESET
-    pinMode(PIN_GPS_RESET, OUTPUT);
     digitalWrite(PIN_GPS_RESET, GPS_RESET_MODE); // assert for 10ms
+    pinMode(PIN_GPS_RESET, OUTPUT);
     delay(10);
     digitalWrite(PIN_GPS_RESET, !GPS_RESET_MODE);
 #endif
@@ -987,8 +987,8 @@ bool GPS::factoryReset()
 {
 #ifdef PIN_GPS_REINIT
     // The L76K GNSS on the T-Echo requires the RESET pin to be pulled LOW
-    pinMode(PIN_GPS_REINIT, OUTPUT);
     digitalWrite(PIN_GPS_REINIT, 0);
+    pinMode(PIN_GPS_REINIT, OUTPUT);
     delay(150); // The L76K datasheet calls for at least 100MS delay
     digitalWrite(PIN_GPS_REINIT, 1);
 #endif
