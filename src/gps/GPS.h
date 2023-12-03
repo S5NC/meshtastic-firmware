@@ -62,7 +62,7 @@ class GPS : private concurrency::OSThread
     uint32_t rx_gpio = 0;
     uint32_t tx_gpio = 0;
     uint32_t en_gpio = 0;
-    int32_t averageLockTime = 0;
+    int32_t averageLockTime = 15000; // FIXME: set to a reasonable 2nd lock time guess. This variable is reset by the second lock so it doesn't skew the average.
     uint32_t GPSCycles = 0;
 
     int speedSelect = 0;
@@ -222,11 +222,11 @@ class GPS : private concurrency::OSThread
 
     /** Get how long we should stay looking for each aquisition
      */
-    uint32_t getWakeTime() const;
+    uint32_t getLockAttemptTime() const;
 
-    /** Get how long we should sleep between aqusition attempts
+    /** Get how often we should try to get a GPS position in milliseconds
      */
-    uint32_t getSleepTime() const;
+    uint32_t getUpdateInterval() const;
 
     /**
      * Tell users we have new GPS readings

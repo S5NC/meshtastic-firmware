@@ -540,10 +540,10 @@ void GPS::setConnected()
  */
 void GPS::setAwake(bool on)
 {
-    if (isAwake != on) {
-        LOG_DEBUG("WANT GPS=%d\n", on);
+    if (isAwake != on) { // If the current GPS state is not as desired
+        LOG_DEBUG("Wanting GPS to be %s\n", on ? "on" : "off");
         isAwake = on;
-        if (!enabled) { // short circuit if the user has disabled GPS
+        if (!enabled) { // short circuit if the user has disabled GPS // FIXME: confusing comment
             setGPSPower(false, false, 0);
             return;
         }
@@ -552,32 +552,39 @@ void GPS::setAwake(bool on)
             lastWakeStartMsec = millis();
         } else {
             lastSleepStartMsec = millis();
-            if (GPSCycles == 1) { // Skipping initial lock time, as it will likely be much longer than average
-                averageLockTime = lastSleepStartMsec - lastWakeStartMsec;
-            } else if (GPSCycles > 1) {
-                averageLockTime += ((int32_t)(lastSleepStartMsec - lastWakeStartMsec) - averageLockTime) / (int32_t)GPSCycles;
-            }
+            uint32_t lockTime = lastSleepStartMsec - lastWakeStartMsec;
+
+            if (GPSCycles > 1) { // Usually this is the case
+                averageLockTime += ((int32_t)lockTime - averageLockTime) / (int32_t)GPSCycles; // Example: GPSCycles is 2, we have had 1 reading which contributed towards the average, so we divide the difference by 2
+                LOG_DEBUG("GPS lock #%d took %d s, average is %d", (int32_t)GPSCycles + 1, lockTime / 1000, averageLockTime / 1000);
+            } else if (GPSCycles == 1) { // On the second GPS lock we have no average value, so set the second lock time as the average
+                averageLockTime = lockTime;
+                LOG_DEBUG("Second GPS lock #%d took %d s. Starting average lock time count with this one", lockTime / 1000);
+            } else { // First GPS lock. The first GPS lock will likely take much longer that others so don't start counting the average with it
+                LOG_DEBUG("Initial GPS lock took %d s. Not contributing initial lock time towards average", lockTime / 1000);
+            }    
             GPSCycles++;
-            LOG_DEBUG("GPS Lock took %d, average %d\n", (lastSleepStartMsec - lastWakeStartMsec) / 1000, averageLockTime / 1000);
         }
-        if ((int32_t)getSleepTime() - averageLockTime >
-            15 * 60 * 1000) { // 15 minutes is probably long enough to make a complete poweroff worth it.
-            setGPSPower(on, false, getSleepTime() - averageLockTime);
-        } else if ((int32_t)getSleepTime() - averageLockTime > 10000) { // 10 seconds is enough for standby
-#ifdef GPS_UC6580
-            setGPSPower(on, false, getSleepTime() - averageLockTime);
+        int32_t sleepTime = (int32_t)getUpdateInterval() - averageLockTime; // estimate how long to sleep such that the GPS has a lock as close to the configured update interval as possible
+        bool standbyOnly;
+        if (sleepTime > 15 * 60 * 1000) { // 15 minutes is probably long enough to make a complete poweroff worth it // FIXME: guesstimated value
+            standbyOnly = false;
+        } else if (timeToSleep > 10000) { // 10 seconds is probably long enough for standby // FIXME: guesstimated value
+#ifndef GPS_UC6580 // FIXME: change to GPS_SUPPORTS_STANDBY or similar
+            standbyOnly = true;
 #else
-            setGPSPower(on, true, getSleepTime() - averageLockTime);
+            standbyOnly = false; // Don't standby if it's GPS_UC6580, instead completely cut off GPS power
 #endif
+        setGPSPower(on, standbyOnly, sleepTime);
         } else if (averageLockTime > 20000) {
-            averageLockTime -= 1000; // eventually want to sleep again.
+            averageLockTime -= 1000; // eventually want to sleep again. // FIXME: change to running average
         }
     }
 }
 
-/** Get how long we should stay looking for each acquisition in msecs
+/** Get how long we should stay looking for each acquisition in milliseconds
  */
-uint32_t GPS::getWakeTime() const
+uint32_t GPS::getLockAttemptTime() const
 {
     uint32_t t = config.position.gps_attempt_time;
 
@@ -586,9 +593,9 @@ uint32_t GPS::getWakeTime() const
     return t * 1000;
 }
 
-/** Get how long we should sleep between aqusition attempts in msecs
+/** Get how often we should try to get a GPS position in milliseconds
  */
-uint32_t GPS::getSleepTime() const
+uint32_t GPS::getUpdateInterval() const
 {
     uint32_t t = config.position.gps_update_interval;
 
@@ -597,9 +604,9 @@ uint32_t GPS::getSleepTime() const
         t = UINT32_MAX; // Sleep forever now
 
     if (t == UINT32_MAX)
-        return t; // already maxint
+        return t; // already maxint, so don't multiply by 1000
 
-    return t * 1000;
+    return t * 1000; // convert to milliseconds and output
 }
 
 void GPS::publishUpdate()
@@ -671,7 +678,7 @@ int32_t GPS::runOnce()
     uint32_t now = millis();
     uint32_t timeAsleep = now - lastSleepStartMsec;
 
-    auto sleepTime = getSleepTime();
+    auto sleepTime = getUpdateInterval();
     if (!isAwake && (sleepTime != UINT32_MAX) &&
         ((timeAsleep > sleepTime) || (isInPowersave && timeAsleep > (sleepTime - averageLockTime)))) {
         // We now want to be awake - so wake up the GPS
@@ -696,15 +703,15 @@ int32_t GPS::runOnce()
         }
 
         now = millis();
-        auto wakeTime = getWakeTime();
-        bool tooLong = wakeTime != UINT32_MAX && (now - lastWakeStartMsec) > wakeTime;
+        uint32_t lockAttemptTime = getLockAttemptTime();
+        bool lockAttemptTimedout = (lockAttemptTime != UINT32_MAX) && (now - lastWakeStartMsec) > lockAttemptTime;
 
         // Once we get a location we no longer desperately want an update
-        // LOG_DEBUG("gotLoc %d, tooLong %d, gotTime %d\n", gotLoc, tooLong, gotTime);
-        if ((gotLoc && gotTime) || tooLong) {
+        // LOG_DEBUG("gotLoc %d, lockAttemptTimedout %d, gotTime %d\n", gotLoc, lockAttemptTimedout, gotTime);
+        if ((gotLoc && gotTime) || lockAttemptTimedout) {
 
-            if (tooLong) {
-                // we didn't get a location during this ack window, therefore declare loss of lock
+            if (lockAttemptTimedout) {
+                // we didn't get a location within the lock attempt time, therefore declare loss of lock
                 if (hasValidLocation) {
                     LOG_DEBUG("hasValidLocation FALLING EDGE (last read: %d)\n", gotLoc);
                 }
