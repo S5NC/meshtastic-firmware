@@ -34,9 +34,9 @@ class ExternalNotificationModule : public SinglePortModule, private concurrency:
 
     uint32_t nagCycleCutoff = UINT32_MAX;
 
-    void setExternalOn(uint8_t index = 0);
-    void setExternalOff(uint8_t index = 0);
-    bool getExternal(uint8_t index = 0);
+    void setPeripheralOn(uint8_t index = 0);
+    void setPeripheralOff(uint8_t index = 0);
+    bool getPeripheralState(uint8_t index = 0);
 
     void stopNow();
 
