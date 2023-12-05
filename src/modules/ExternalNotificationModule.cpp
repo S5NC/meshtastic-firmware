@@ -288,7 +288,7 @@ ExternalNotificationModule::ExternalNotificationModule()
         // If using a buzzer, configure it
         if (moduleConfig.external_notification.output_buzzer) {
             // FIXME: we should either change the `config.` value throughout, or not change it and change our own local copy like we do for `output`
-            // FIXME: move the `config.device.buzzer_gpio = config.device.buzzer_gpio ? config.device.buzzer_gpio : PIN_BUZZER;` to here and do it for both active and PWM buzzers
+            // FIXME: move the `config.device.buzzer_gpio = config.device.buzzer_gpio ? config.device.buzzer_gpio : PIN_BUZZER;` to here and do it for both active and PWM buzzers, but need to check if there's a reason the variant file value isn't checked for PWM.
             // if configured to treat the buzzer as an active buzzer
             if (!moduleConfig.external_notification.use_pwm) {
                 LOG_INFO("Using Pin %i for buzzer\n", moduleConfig.external_notification.output_buzzer);
