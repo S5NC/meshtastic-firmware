@@ -37,8 +37,10 @@ uint8_t brightnessValues[] = {0, 10, 20, 30, 50, 90, 160, 170}; // blue gets mul
 bool ascending = true;
 #endif
 
+// FIXME: use enums for external notification pin, buzzer, and vibra, instead of raw 0, 1, 2
+
 #ifndef PIN_BUZZER
-#define PIN_BUZZER false
+#define PIN_BUZZER false // FIXME: default to -1 not 0?
 #endif
 
 /*
@@ -50,7 +52,7 @@ bool ascending = true;
 #ifdef EXT_NOTIFY_OUT
 #define EXT_NOTIFICATION_MODULE_OUTPUT EXT_NOTIFY_OUT
 #else
-#define EXT_NOTIFICATION_MODULE_OUTPUT 0
+#define EXT_NOTIFICATION_MODULE_OUTPUT 0 // FIXME: use -1 for unset pin (like RadioLib)
 #endif
 #define EXT_NOTIFICATION_MODULE_OUTPUT_MS 1000
 
@@ -60,9 +62,8 @@ meshtastic_RTTTLConfig rtttlConfig;
 
 ExternalNotificationModule *externalNotificationModule;
 
-bool externalCurrentState[3] = {};
-
-uint32_t externalTurnedOn[3] = {};
+bool externalCurrentState[3] = {}; // the state of the notification signal pin, buzzer, and vibramotor
+uint32_t externalTurnedOn[3] = {}; // when the state of the notification signal pin, buzzer, and vibramotor were last changed
 
 static const char *rtttlConfigFile = "/prefs/ringtone.proto";
 
@@ -71,11 +72,11 @@ int32_t ExternalNotificationModule::runOnce()
     if (!moduleConfig.external_notification.enabled) {
         return INT32_MAX; // we don't need this thread here...
     } else {
-        if ((nagCycleCutoff < millis()) && !rtttl::isPlaying()) {
-            // let the song finish if we reach timeout
+        // let the song finish if we reach timeout by only stopping external notifications if RTTTL has also stopped playing
+        if ((millis() > nagCycleCutoff) && !rtttl::isPlaying()) {
             nagCycleCutoff = UINT32_MAX;
             LOG_INFO("Turning off external notification: ");
-            for (int i = 0; i < 2; i++) {
+            for (int i = 0; i < 2; i++) { // FIXME: ensure this isn't supposed to affect buzzer (2) too
                 setExternalOff(i);
                 externalTurnedOn[i] = 0;
                 LOG_INFO("%d ", i);
@@ -87,21 +88,13 @@ int32_t ExternalNotificationModule::runOnce()
 
         // If the output is turned on, turn it back off after the given period of time.
         if (isNagging) {
-            if (externalTurnedOn[0] + (moduleConfig.external_notification.output_ms ? moduleConfig.external_notification.output_ms
-                                                                                    : EXT_NOTIFICATION_MODULE_OUTPUT_MS) <
-                millis()) {
-                getExternal(0) ? setExternalOff(0) : setExternalOn(0);
+            // Invert the state of every external peripheral
+            for (int i = 0; i <= 2; i++) {
+                if (millis() > externalTurnedOn[0] + (moduleConfig.external_notification.output_ms ? moduleConfig.external_notification.output_ms : EXT_NOTIFICATION_MODULE_OUTPUT_MS)) {
+                    getExternal(i) ? setExternalOff(i) : setExternalOn(i);
+                }
             }
-            if (externalTurnedOn[1] + (moduleConfig.external_notification.output_ms ? moduleConfig.external_notification.output_ms
-                                                                                    : EXT_NOTIFICATION_MODULE_OUTPUT_MS) <
-                millis()) {
-                getExternal(1) ? setExternalOff(1) : setExternalOn(1);
-            }
-            if (externalTurnedOn[2] + (moduleConfig.external_notification.output_ms ? moduleConfig.external_notification.output_ms
-                                                                                    : EXT_NOTIFICATION_MODULE_OUTPUT_MS) <
-                millis()) {
-                getExternal(2) ? setExternalOff(2) : setExternalOn(2);
-            }
+
 #ifdef HAS_NCP5623
             if (rgb_found.type == ScanI2C::NCP5623) {
                 red = (colorState & 4) ? brightnessValues[brightnessIndex] : 0;          // Red enabled on colorState = 4,5,6,7
@@ -132,17 +125,18 @@ int32_t ExternalNotificationModule::runOnce()
 #endif
         }
 
-        // now let the PWM buzzer play
         if (moduleConfig.external_notification.use_pwm) {
+            // Let the PWM buzzer play on if it's set to be playing
             if (rtttl::isPlaying()) {
                 rtttl::play();
-            } else if (isNagging && (nagCycleCutoff >= millis())) {
-                // start the song again if we have time left
+            }
+            // If we aren't playing and are still within the nag window, play the ringtone again
+            else if (isNagging && (millis() < nagCycleCutoff)) {
                 rtttl::begin(config.device.buzzer_gpio, rtttlConfig.ringtone);
             }
         }
 
-        return 25;
+        return 25; // FIXME: communicate with rtttl to find which pause length is best to maintain optimal ringtone playback, and find the minimum with another value (like perhaps 25)
     }
 }
 
@@ -158,20 +152,20 @@ bool ExternalNotificationModule::wantPacket(const meshtastic_MeshPacket *p)
  */
 void ExternalNotificationModule::setExternalOn(uint8_t index)
 {
-    externalCurrentState[index] = 1;
-    externalTurnedOn[index] = millis();
+    externalCurrentState[index] = 1; // Record that it's on
+    externalTurnedOn[index] = millis(); // Record when it got turned on
 
     switch (index) {
-    case 1:
+    case 1: // if using the vibramotor, turn it on
         if (moduleConfig.external_notification.output_vibra)
             digitalWrite(moduleConfig.external_notification.output_vibra, true);
         break;
-    case 2:
+    case 2: // if using the buzzer, turn it on
         if (moduleConfig.external_notification.output_buzzer)
             digitalWrite(moduleConfig.external_notification.output_buzzer, true);
         break;
-    default:
-        if (output > 0)
+    default: // Non-exclusively triggered when index is 0, if there's a valid external notification pin, set it to its active state
+        if (output > 0) // FIXME: change unset value to -1
             digitalWrite(output, (moduleConfig.external_notification.active ? true : false));
         break;
     }
@@ -187,20 +181,20 @@ void ExternalNotificationModule::setExternalOn(uint8_t index)
 
 void ExternalNotificationModule::setExternalOff(uint8_t index)
 {
-    externalCurrentState[index] = 0;
-    externalTurnedOn[index] = millis();
+    externalCurrentState[index] = 0; // Record that it's off
+    externalTurnedOn[index] = millis(); // Record when it got turned off
 
     switch (index) {
-    case 1:
+    case 1: // if using the vibramotor, turn it off
         if (moduleConfig.external_notification.output_vibra)
             digitalWrite(moduleConfig.external_notification.output_vibra, false);
         break;
-    case 2:
+    case 2: // if using the buzzer, turn it off
         if (moduleConfig.external_notification.output_buzzer)
             digitalWrite(moduleConfig.external_notification.output_buzzer, false);
         break;
-    default:
-        if (output > 0)
+    default:  // Non-exclusively triggered when index is 0, if there's a valid external notification pin, set it to its inactive state
+        if (output > 0) // FIXME: change unset value to -1
             digitalWrite(output, (moduleConfig.external_notification.active ? false : true));
         break;
     }
@@ -218,6 +212,7 @@ void ExternalNotificationModule::setExternalOff(uint8_t index)
 #endif
 }
 
+// Get the state of the provided peripheral
 bool ExternalNotificationModule::getExternal(uint8_t index)
 {
     return externalCurrentState[index];
@@ -226,8 +221,8 @@ bool ExternalNotificationModule::getExternal(uint8_t index)
 void ExternalNotificationModule::stopNow()
 {
     rtttl::stop();
-    nagCycleCutoff = 1; // small value
     isNagging = false;
+    nagCycleCutoff = 1; // small value // FIXME: why not 0? Is it even needed to set this if isNagging is set to false and is always checked?
     setIntervalFromNow(0);
 #ifdef T_WATCH_S3
     drv.stop();
@@ -256,6 +251,7 @@ ExternalNotificationModule::ExternalNotificationModule()
     // moduleConfig.external_notification.nag_timeout = 300;
 
     if (moduleConfig.external_notification.enabled) {
+        // Load the ringtone, if it fails to load, use the default one below
         if (!nodeDB.loadProto(rtttlConfigFile, meshtastic_RTTTLConfig_size, sizeof(meshtastic_RTTTLConfig),
                               &meshtastic_RTTTLConfig_msg, &rtttlConfig)) {
             memset(rtttlConfig.ringtone, 0, sizeof(rtttlConfig.ringtone));
@@ -265,30 +261,39 @@ ExternalNotificationModule::ExternalNotificationModule()
         }
 
         LOG_INFO("Initializing External Notification Module\n");
-
+        
+        // FIXME: use -1 for moduleConfig.external_notification.output for unset pin
+        // Decide which pin to use as the external notification signal
         output = moduleConfig.external_notification.output ? moduleConfig.external_notification.output
                                                            : EXT_NOTIFICATION_MODULE_OUTPUT;
 
-        // Set the direction of a pin
-        if (output > 0) {
+        // If that pin is valid, configure it as an output
+        if (output > 0) { // FIXME: change unset value to -1
             LOG_INFO("Using Pin %i in digital mode\n", output);
             pinMode(output, OUTPUT);
         }
         setExternalOff(0);
         externalTurnedOn[0] = 0;
+        // If using a vibramotor, configure it
         if (moduleConfig.external_notification.output_vibra) {
             LOG_INFO("Using Pin %i for vibra motor\n", moduleConfig.external_notification.output_vibra);
             pinMode(moduleConfig.external_notification.output_vibra, OUTPUT);
             setExternalOff(1);
             externalTurnedOn[1] = 0;
         }
+        // If using a buzzer, configure it
         if (moduleConfig.external_notification.output_buzzer) {
+            // FIXME: we should either change the `config.` value throughout, or not change it and change our own local copy like we do for `output`
+            // FIXME: move the `config.device.buzzer_gpio = config.device.buzzer_gpio ? config.device.buzzer_gpio : PIN_BUZZER;` to here and do it for both active and PWM buzzers
+            // if configured to treat the buzzer as an active buzzer
             if (!moduleConfig.external_notification.use_pwm) {
                 LOG_INFO("Using Pin %i for buzzer\n", moduleConfig.external_notification.output_buzzer);
                 pinMode(moduleConfig.external_notification.output_buzzer, OUTPUT);
                 setExternalOff(2);
                 externalTurnedOn[2] = 0;
-            } else {
+            }
+            // if configured to treat the buzzer as a PWM (passive) buzzer
+            else {
                 config.device.buzzer_gpio = config.device.buzzer_gpio ? config.device.buzzer_gpio : PIN_BUZZER;
                 // in PWM Mode we force the buzzer pin if it is set
                 LOG_INFO("Using Pin %i in PWM mode\n", config.device.buzzer_gpio);
@@ -315,6 +320,7 @@ ProcessMessage ExternalNotificationModule::handleReceived(const meshtastic_MeshP
         drv.setWaveform(2, 0);
         drv.go();
 #endif
+        // If the message is from someone else (not from ourselves)
         if (getFrom(&mp) != nodeDB.getNodeNum()) {
 
             // Check if the message contains a bell character. Don't do this loop for every pin, just once.
@@ -326,11 +332,13 @@ ProcessMessage ExternalNotificationModule::handleReceived(const meshtastic_MeshP
                 }
             }
 
+            // if set to trigger the external notification signal pin when there's a bell, if there was a bell, trigger it
             if (moduleConfig.external_notification.alert_bell) {
                 if (containsBell) {
                     LOG_INFO("externalNotificationModule - Notification Bell\n");
                     isNagging = true;
                     setExternalOn(0);
+                    // FIXME: completely separate signal pin duration, and buzzer/vibra nag duration.
                     if (moduleConfig.external_notification.nag_timeout) {
                         nagCycleCutoff = millis() + moduleConfig.external_notification.nag_timeout * 1000;
                     } else {
@@ -344,6 +352,7 @@ ProcessMessage ExternalNotificationModule::handleReceived(const meshtastic_MeshP
                     LOG_INFO("externalNotificationModule - Notification Bell (Vibra)\n");
                     isNagging = true;
                     setExternalOn(1);
+                    // FIXME: completely separate signal pin duration, and buzzer/vibra nag duration.
                     if (moduleConfig.external_notification.nag_timeout) {
                         nagCycleCutoff = millis() + moduleConfig.external_notification.nag_timeout * 1000;
                     } else {
@@ -361,6 +370,7 @@ ProcessMessage ExternalNotificationModule::handleReceived(const meshtastic_MeshP
                     } else {
                         rtttl::begin(config.device.buzzer_gpio, rtttlConfig.ringtone);
                     }
+                    // FIXME: completely separate signal pin duration, and buzzer/vibra nag duration.
                     if (moduleConfig.external_notification.nag_timeout) {
                         nagCycleCutoff = millis() + moduleConfig.external_notification.nag_timeout * 1000;
                     } else {
@@ -373,6 +383,7 @@ ProcessMessage ExternalNotificationModule::handleReceived(const meshtastic_MeshP
                 LOG_INFO("externalNotificationModule - Notification Module\n");
                 isNagging = true;
                 setExternalOn(0);
+                // FIXME: completely separate signal pin duration, and buzzer/vibra nag duration.
                 if (moduleConfig.external_notification.nag_timeout) {
                     nagCycleCutoff = millis() + moduleConfig.external_notification.nag_timeout * 1000;
                 } else {
