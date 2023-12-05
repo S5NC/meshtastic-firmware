@@ -34,10 +34,6 @@ class ExternalNotificationModule : public SinglePortModule, private concurrency:
 
     uint32_t nagCycleCutoff = UINT32_MAX;
 
-    void setPeripheralOn(uint8_t index = 0);
-    void setPeripheralOff(uint8_t index = 0);
-    bool getPeripheralState(uint8_t index = 0);
-
     void stopNow();
 
     void handleGetRingtone(const meshtastic_MeshPacket &req, meshtastic_AdminMessage *response);
